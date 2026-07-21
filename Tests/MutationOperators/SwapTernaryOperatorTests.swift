@@ -144,4 +144,24 @@ final class SwapTernaryOperatorTests: MuterTestCase {
 
         XCTAssertTrue(visitor.schemataMappings.isEmpty)
     }
+
+    func test_shouldIgnoreTernaryWhoseElseExpressionIsAComparison() throws {
+        // SwiftSyntax flattens `x < y` into the outer sequence, so swapping would take only `x`
+        // and leave `< y` behind, producing `p < q < y`, which does not compile.
+        let source = try sourceCode(
+            """
+            func compare(_ x: Int, _ y: Int, _ p: Int, _ q: Int) -> Bool {
+                return x == y ? p < q : x < y
+            }
+            """
+        )
+
+        let visitor = SwapTernaryOperator.Visitor(
+            sourceCodeInfo: .init(path: "/path/to/file", code: source)
+        )
+
+        visitor.walk(source)
+
+        XCTAssertTrue(visitor.schemataMappings.isEmpty)
+    }
 }

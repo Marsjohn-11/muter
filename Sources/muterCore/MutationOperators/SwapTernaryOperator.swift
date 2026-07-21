@@ -43,11 +43,12 @@ enum SwapTernaryOperator {
                 return super.visit(node)
             }
 
-            guard !containsComplexExpressions(cast(node)) else {
+            guard !containsComplexExpressions(cast(node)),
+                  let mutatedSyntax = mutated(node)
+            else {
                 return super.visit(node)
             }
 
-            let mutatedSyntax = mutated(node)
             let position = endLocation(for: node)
             let snapshot = MutationOperator.Snapshot(
                 before: node.description.trimmed.inlined,
@@ -56,7 +57,7 @@ enum SwapTernaryOperator {
             )
 
             add(
-                mutation: mutated(node),
+                mutation: mutatedSyntax,
                 with: node,
                 at: position,
                 snapshot: snapshot
@@ -79,13 +80,24 @@ enum SwapTernaryOperator {
             )
         }
 
-        private func mutated(_ node: ExprListSyntax) -> ExprListSyntax {
+        /// `nil` when there is no ternary this operator can safely swap, so no mutant is emitted.
+        private func mutated(_ node: ExprListSyntax) -> ExprListSyntax? {
             var children = cast(node)
             guard children.contains(where: { $0.is(UnresolvedTernaryExprSyntax.self) }),
                   let index = ternaryIndex(node),
                   let ternary = children[index].as(UnresolvedTernaryExprSyntax.self)
             else {
-                return node
+                return nil
+            }
+
+            // Only swap when the else-expression is a SINGLE trailing child (`… ? a : b`, so the
+            // ternary is at `index` and `b` at `index + 1`, the last element). When the else-expression
+            // is itself a comparison/sequence (`… ? a : c < d`), SwiftSyntax flattens `c < d` into
+            // multiple sibling children of the outer SequenceExpr; swapping would take only `c` and
+            // leave `< d` dangling, producing `x < y < d` — adjacent operators in a non-associative
+            // precedence group, a compile error. Emit no mutant rather than invalid code.
+            guard children.count == index + 2 else {
+                return nil
             }
 
             let secondChoice = children[index + 1]
