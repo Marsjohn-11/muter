@@ -5,6 +5,10 @@ class CopyProjectToTempDirectory: MutationStep {
     private var fileManager: FileSystemManager
     @Dependency(\.notificationCenter)
     private var notificationCenter: NotificationCenter
+    @Dependency(\.process)
+    private var process: ProcessFactory
+
+    private let moduleCacheDirectoryName = "ModuleCache"
 
     /// Directory names that must NOT be carried into the mutated copy:
     ///   - `.build`, `build`, `DerivedData`: build outputs whose
@@ -62,6 +66,8 @@ class CopyProjectToTempDirectory: MutationStep {
                 )
             }
 
+            discardModuleCaches(in: state.mutatedProjectDirectoryURL)
+
             notificationCenter.post(
                 name: .projectCopyFinished,
                 object: state.mutatedProjectDirectoryURL.path
@@ -72,6 +78,24 @@ class CopyProjectToTempDirectory: MutationStep {
             throw MuterError.projectCopyFailed(
                 reason: error.localizedDescription
             )
+        }
+    }
+
+    /// Clang module caches record the absolute path they were built under. Copied into the sandbox they
+    /// no longer match where they now live, and every compile in the copy fails with
+    /// `precompiled file … was compiled with module cache path …` followed by
+    /// `missing required module 'SwiftShims'`. The filtered copy already skips the usual build
+    /// directories (`excludedDirectoryNames`); this removes any cache that still came along inside a
+    /// build directory with another name, such as a custom SwiftPM `--scratch-path`. The compiler
+    /// rebuilds the caches in place on the next compile.
+    private func discardModuleCaches(in directory: URL) {
+        let caches = process()
+            .find(atPath: directory.path, byName: moduleCacheDirectoryName)?
+            .split(separator: "\n")
+            .map(String.init) ?? []
+
+        for cache in caches {
+            try? fileManager.removeItem(atPath: cache)
         }
     }
 
